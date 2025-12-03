@@ -138,6 +138,8 @@ contract InternalSwapPool is BaseHook {
         BalanceDelta delta,
         bytes calldata hookData
     ) internal override returns (bytes4 selector_, int128 hookDeltaUnspecified_) {
+        // Distribute fees to our LPs
+        _distributeFees(key);
         selector_ = IHooks.afterSwap.selector;
     }
 
@@ -151,7 +153,25 @@ contract InternalSwapPool is BaseHook {
      * @param _poolKey The PoolKey reference that will have fees distributed
      */
     function _distributeFees(PoolKey calldata _poolKey) internal {
-        //
+        // Get the amount of the native token available to donate
+        PoolId poolId = _poolKey.toId();
+        uint256 donateAmount = _poolFees[poolId].amount0;
+
+        // Ensure that the collection has sufficient fees available
+        if (donateAmount < DONATE_THRESHOLD_MIN) {
+            return;
+        }
+
+        // Make our donation to the pool
+        BalanceDelta delta = poolManager.donate(_poolKey, donateAmount, 0, "");
+
+        // Check the native delta amounts that we need to transfer from the contract
+        if (delta.amount0() < 0) {
+            _poolKey.currency0.settle(poolManager, address(this), uint256(uint128(-delta.amount0())), false);
+        }
+
+        // Reduce our available fees
+        _poolFees[poolId].amount0 -= donateAmount;
     }
 
     /**
